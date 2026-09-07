@@ -1,0 +1,4 @@
+## IDF Component Manager Manifest File
+dependencies:
+  espressif/cjson: "^1.7.19" 
+  espressif/esp32-camera: ">=2.0.3"
