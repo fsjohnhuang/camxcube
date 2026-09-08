@@ -1,14 +1,18 @@
 mod routes;
 mod handlers;
+mod models;
+mod state;
 
 use std::net::SocketAddr;
 use axum::{ Router };
 use tokio::signal;
 
+
 #[tokio::main]
 async fn main() {
     let app = Router::new()
-        .merge(routes::routes());
+        .nest("/api", routes::routes())
+        .with_state(state::state());
 
     // Bind to all interfaces on specified port
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));

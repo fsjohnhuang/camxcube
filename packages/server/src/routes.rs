@@ -1,10 +1,11 @@
 use axum::{Router, routing::{get, post}};
-use crate::handlers::{*};
+use crate::{handlers::*, state::AppState};
 
-pub fn routes() -> Router {
+pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/api/health", get( health_check))
-        .route("/api/heart_beat", post(heart_beat))
-        .route("/api/upload", post(upload))
-        .route("/api/phote", post(take_phote))
+        .route("/health", get( health_check))
+        .route("/heart_beat", post(heart_beat))
+        .route("/devices", get(get_device_info_list))
+        .route("/upload", post(upload))
+        .route("/phote", post(take_phote))
 }
