@@ -7,11 +7,15 @@ mod config;
 use std::net::SocketAddr;
 use axum::{ Router };
 use tokio::signal;
+use axum_vite::{ViteConfig, spa_router};
 
 
 #[tokio::main]
 async fn main() {
+    let vite_config = ViteConfig::from_env(axum_vite::embedded_dir!("$CARGO_MANIFEST_DIR/../web/dist"));
+
     let app = Router::new()
+        .merge(spa_router(vite_config))
         .nest("/api", routes::routes())
         .with_state(state::state());
 

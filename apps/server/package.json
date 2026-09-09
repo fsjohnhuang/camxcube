@@ -1,0 +1,22 @@
+{
+  "name": "@camxcube/server",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "cargo watch -w src -w .env -x run",
+    "build": "cargo build --release",
+    "build:debug": "cargo build",
+    "test": "cargo test",
+    "lint": "cargo fmt -- --check"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "^11.0.9",
+      "onFail": "download"
+    }
+  },
+  "dependencies": {
+    "@camxcube/web": "workspace:*"
+  }
+}

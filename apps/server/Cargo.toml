@@ -5,9 +5,11 @@ edition = "2024"
 
 [dependencies]
 axum = { version = "0.8.9", features = ["multipart"] }
+axum-vite = "0.3.4"
 chrono = { version = "0.4.45", features = ["now"] }
 dotenvy = "0.15.7"
 getifs = "0.6.1"
+include_dir = "0.7.4"
 reqwest = "0.13.4"
 serde = { version = "1.0.229", features = ["derive"] }
 tokio = { version = "1.53.1", features = ["full", "macros"] }
