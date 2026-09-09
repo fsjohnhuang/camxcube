@@ -14,6 +14,7 @@
     "@heroui/react": "^3.2.4",
     "@heroui/styles": "^3.2.4",
     "@react-router/fs-routes": "^8.3.1",
+    "@rxsilience/core": "^0.1.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-query": "^5.102.8",
     "axios": "^1.20.0",
@@ -23,6 +24,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router": "^8.3.1",
+    "react-router-dom": "^7.18.3",
     "tailwindcss": "^4.3.3"
   },
   "devDependencies": {

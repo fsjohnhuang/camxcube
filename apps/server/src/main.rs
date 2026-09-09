@@ -3,6 +3,7 @@ mod handlers;
 mod models;
 mod state;
 mod config;
+mod device;
 
 use std::net::SocketAddr;
 use axum::{ Router };
@@ -17,7 +18,9 @@ async fn main() {
     let app = Router::new()
         .merge(spa_router(vite_config))
         .nest("/api", routes::routes())
+        .nest("/api/device", device::routes())
         .with_state(state::state());
+    
 
     // Bind to all interfaces on specified port
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
