@@ -46,12 +46,11 @@ pub async fn heart_beat(
 }
 
 pub async fn get_device_info_list(State(state): State<AppState>) -> Result<impl IntoResponse, StatusCode> {
-    // let list = vec![1, 2, 3];
     let mut list = state.device_info_list.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let now = chrono::Utc::now().timestamp_millis();
     // delete expired items
     let mut deleting_index = Vec::<usize>::new();
-    for (index, item) in list.iter_mut().enumerate() {
+    for (index, item) in list.iter().enumerate() {
         match item.updated_at {
             Some(updated_at) => {
                 if now - updated_at > 5 * 1000 {
@@ -79,13 +78,16 @@ pub async fn get_device_info_list(State(state): State<AppState>) -> Result<impl 
     Ok(Json(res))
 }
 
-pub async fn upload(mut multipart: Multipart) -> Result<impl IntoResponse, StatusCode> {
+pub async fn upload(
+    State(state): State<AppState>, 
+    mut multipart: Multipart
+) -> Result<impl IntoResponse, StatusCode> {
     while let Some(mut field) = multipart.next_field().await.map_err(|_| StatusCode::BAD_REQUEST)? {
         let name = field.name().unwrap_or("unnamed").to_string();
 
         match field.file_name() {
             Some(filename) => {
-                let mut file = File::create(format!("./{}", filename)).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                let mut file = File::create(format!("{}/{}", state.config.image_folder, filename)).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
                 while let Some(chunk) = field.chunk().await.map_err(|_| StatusCode::BAD_REQUEST)? {
                     file.write_all(&chunk).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?; 
                 }
