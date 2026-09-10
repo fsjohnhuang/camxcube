@@ -1,5 +1,4 @@
 {
   "C_Cpp.intelliSenseEngine": "default",
   "rust-analyzer.linkedProjects": ["./apps/server/Cargo.toml"],
-  "cmake.sourceDirectory": "D:/repos/side-projects/camxcube/apps/esp32-camera"
 }
