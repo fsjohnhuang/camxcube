@@ -3,23 +3,30 @@ mod handlers;
 mod models;
 mod state;
 mod config;
+
 mod device;
 
 use std::net::SocketAddr;
 use axum::{ Router };
 use tokio::signal;
 use axum_vite::{ViteConfig, spa_router};
+use sqlx::sqlite::SqlitePoolOptions;
+
+use crate::config::Config;
 
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>>  {
     let vite_config = ViteConfig::from_env(axum_vite::embedded_dir!("$CARGO_MANIFEST_DIR/../web/dist"));
+
+    let config = Config::from_env().unwrap();
+    let pool = SqlitePoolOptions::new().max_connections(5).connect(&config.database_url).await?;
 
     let app = Router::new()
         .merge(spa_router(vite_config))
         .nest("/api", routes::routes())
-        .nest("/api/device", device::routes())
-        .with_state(state::state());
+        .nest("/api/devices", device::routes())
+        .with_state(state::state(config, pool));
     
 
     // Bind to all interfaces on specified port
@@ -40,6 +47,8 @@ async fn main() {
         .with_graceful_shutdown(shutdown_signal())
         .await
         .unwrap();
+
+    Ok(())
 }
 
 async fn shutdown_signal() {

@@ -1,4 +1,7 @@
 use std::sync::{Arc, Mutex};
+use sqlx::Pool;
+use sqlx::Sqlite;
+
 use crate::{config::Config, models::DeviceInfo};
 
 /**
@@ -11,11 +14,13 @@ type SharedList<T> = Arc<Mutex<Vec<T>>>;
 pub struct AppState {
     pub device_info_list: SharedList<DeviceInfo>,
     pub config: Arc<Config>,
+    pub pool: Arc<Pool<Sqlite>>,
 }
 
-pub fn state() -> AppState {
+pub fn state(config: Config, pool: Pool<Sqlite>) -> AppState {
     AppState {
         device_info_list: Arc::new(Mutex::new(Vec::new())),
-        config: Arc::new(Config::from_env().unwrap()),
+        config: Arc::new(config),
+        pool: Arc::new(pool)
     }
 }
