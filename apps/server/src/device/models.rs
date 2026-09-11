@@ -1,14 +1,14 @@
 use sqlx::FromRow;
 use serde::{Serialize, Deserialize};
 
-#[derive(Debug, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Serialize, Deserialize, Default, FromRow)]
 pub struct Device {
-    id: i64,
-    mac: String,
-    ip: String,
-    name: String,
-    description: String,
-    status: u8,
-    battery: u8,
-    location: String,
+    id: Option<i64>,
+    mac: Option<String>,
+    ip: Option<String>,
+    name: Option<String>,
+    description: Option<String>,
+    status: Option<u8>,
+    battery: Option<u8>,
+    location: Option<String>,
 }

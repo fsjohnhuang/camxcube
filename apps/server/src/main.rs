@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use axum::{ Router };
 use tokio::signal;
 use axum_vite::{ViteConfig, spa_router};
-use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::{Sqlite, SqlitePool, migrate::MigrateDatabase, sqlite::SqlitePoolOptions};
 
 use crate::config::Config;
 
@@ -20,6 +20,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>>  {
     let vite_config = ViteConfig::from_env(axum_vite::embedded_dir!("$CARGO_MANIFEST_DIR/../web/dist"));
 
     let config = Config::from_env().unwrap();
+
+    Sqlite::database_exists(&config.database_url).await.expect("Database is not found");
     let pool = SqlitePoolOptions::new().max_connections(5).connect(&config.database_url).await?;
 
     let app = Router::new()
