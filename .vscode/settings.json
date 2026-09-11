@@ -1,4 +1,10 @@
 {
   "C_Cpp.intelliSenseEngine": "default",
-  "rust-analyzer.linkedProjects": ["./apps/server/Cargo.toml"],
+  "rust-analyzer.linkedProjects": [
+    "./apps/server/Cargo.toml"
+  ],
+  "editor.formatOnSave": true,
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer",
+  }
 }

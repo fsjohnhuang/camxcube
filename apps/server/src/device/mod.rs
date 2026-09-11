@@ -1,7 +1,8 @@
-mod routes;
-mod handlers;
-mod service;
+mod dto;
+mod handler;
+mod model;
 mod repository;
-mod models;
+mod route;
+mod service;
 
-pub use routes::routes;
+pub use route::route;

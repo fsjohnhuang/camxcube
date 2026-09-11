@@ -7,7 +7,8 @@ CREATE TABLE device (
     description TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME,
-    status INTEGER DEFAULT 0 CHECK (status IN (0, 1, 2)),
+    -- status: 1=online, 2=offline, 0=deleted
+    status INTEGER DEFAULT 1 CHECK (status IN (0, 1, 2)),
     battery INTEGER,
     location TEXT
 );
