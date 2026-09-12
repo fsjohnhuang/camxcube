@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use sqlx::FromRow;
 
 #[derive(Debug, FromRow)]
@@ -10,4 +11,7 @@ pub struct Device {
     pub status: u8,
     pub battery: Option<u8>,
     pub location: Option<String>,
+    pub synced_at: Option<u64>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: Option<DateTime<Utc>>,
 }

@@ -10,6 +10,7 @@ CREATE TABLE device (
     -- status: 1=online, 2=offline, 0=deleted
     status INTEGER DEFAULT 1 CHECK (status IN (0, 1, 2)),
     battery INTEGER,
+    synced_at INTEGER,
     location TEXT
 );
 

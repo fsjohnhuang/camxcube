@@ -6,5 +6,6 @@
   "editor.formatOnSave": true,
   "[rust]": {
     "editor.defaultFormatter": "rust-lang.rust-analyzer",
-  }
+  },
+  "cmake.sourceDirectory": "/Users/johnhuang/Desktop/camxcube/apps/esp32-camera"
 }

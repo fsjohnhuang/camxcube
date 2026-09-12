@@ -1,10 +1,10 @@
-use super::dto::CreateDevice;
+use super::dto::DeviceDto;
 use super::model::Device;
 use sqlx::{Pool, Sqlite};
 
 pub async fn get_device_list(pool: &Pool<Sqlite>) -> Result<Vec<Device>, sqlx::Error> {
     match sqlx::query_as::<_, Device>(
-        "SELECT id, mac, ip, name, description, status, battery, location FROM device",
+        "SELECT id, mac, ip, name, description, status, battery, synced_at, created_at, updated_at, location FROM device",
     )
     .fetch_all(pool)
     .await
@@ -17,14 +17,39 @@ pub async fn get_device_list(pool: &Pool<Sqlite>) -> Result<Vec<Device>, sqlx::E
     }
 }
 
-pub async fn add_device(pool: &Pool<Sqlite>, device: &CreateDevice) -> Result<i64, sqlx::Error> {
-    match sqlx::query("INSERT INTO device(mac, ip) values(?, ?)")
+pub async fn create_device(pool: &Pool<Sqlite>, device: &DeviceDto) -> Result<i64, sqlx::Error> {
+    match sqlx::query("INSERT INTO device(mac, ip) VALUES(?, ?)")
         .bind(&device.mac)
         .bind(&device.ip)
         .execute(pool)
         .await
     {
         Ok(result) => Ok(result.last_insert_rowid()),
+        Err(e) => {
+            eprintln!("SQLx error: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn update_device(
+    pool: &Pool<Sqlite>,
+    id: i64,
+    device: &DeviceDto,
+) -> Result<Option<i64>, sqlx::Error> {
+    match sqlx::query("UPDATE device SET ip = ? WHERE id = ?")
+        .bind(&device.ip)
+        .bind(id)
+        .execute(pool)
+        .await
+    {
+        Ok(result) => {
+            if result.rows_affected() > 0 {
+                Ok(Some(id))
+            } else {
+                Ok(None)
+            }
+        }
         Err(e) => {
             eprintln!("SQLx error: {:?}", e);
             Err(e)
@@ -52,7 +77,7 @@ pub async fn delete_device(pool: &Pool<Sqlite>, id: i64) -> Result<Option<u64>, 
 
 pub async fn get_device(pool: &Pool<Sqlite>, id: i64) -> Result<Option<Device>, sqlx::Error> {
     match sqlx::query_as::<_, Device>(
-        "select id, mac, ip, name, description, status, battery, location FROM device where id = ?",
+        "SELECT id, mac, ip, name, description, status, battery, synced_at, created_at, updated_at, location FROM device where id = ?",
     )
     .bind(id)
     .fetch_optional(pool)
@@ -72,6 +97,20 @@ pub async fn get_count(pool: &Pool<Sqlite>) -> Result<u64, sqlx::Error> {
         .await
     {
         Ok(result) => Ok(result),
+        Err(e) => {
+            eprintln!("SQLx error: {:?}", e);
+            Err(e)
+        }
+    }
+}
+
+pub async fn get_device_by_mac(pool: &Pool<Sqlite>, mac: &str) -> Result<Option<i64>, sqlx::Error> {
+    match sqlx::query_scalar::<_, i64>("select id FROM device where mac = ?")
+        .bind(mac)
+        .fetch_optional(pool)
+        .await
+    {
+        Ok(id) => Ok(id),
         Err(e) => {
             eprintln!("SQLx error: {:?}", e);
             Err(e)
