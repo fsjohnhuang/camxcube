@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use super::model::Device;
 
 #[derive(Debug, Deserialize)]
-pub struct DeviceDto {
+pub struct CreateDeviceDto {
     pub mac: String,
     pub ip: String,
     pub name: Option<String>,
@@ -13,6 +13,33 @@ pub struct DeviceDto {
     pub battery: Option<u8>,
     pub location: Option<String>,
     pub synced_at: Option<u32>, // ms
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateDeviceDto {
+    pub mac: Option<String>,
+    pub ip: Option<String>,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub status: Option<u8>,
+    pub battery: Option<u8>,
+    pub location: Option<String>,
+    pub synced_at: Option<u32>, // ms
+}
+
+impl From<CreateDeviceDto> for UpdateDeviceDto {
+    fn from(value: CreateDeviceDto) -> Self {
+        UpdateDeviceDto {
+            mac: Some(value.mac),
+            ip: Some(value.ip),
+            name: value.name,
+            description: value.description,
+            status: value.status,
+            battery: value.battery,
+            location: value.location,
+            synced_at: value.synced_at,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Default)]

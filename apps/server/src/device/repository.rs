@@ -1,6 +1,6 @@
-use super::dto::DeviceDto;
+use super::dto::{CreateDeviceDto, UpdateDeviceDto};
 use super::model::Device;
-use sqlx::{Encode, Pool, QueryBuilder, Sqlite, Type};
+use sqlx::{Pool, QueryBuilder, Sqlite};
 
 pub async fn get_device_list(pool: &Pool<Sqlite>) -> Result<Vec<Device>, sqlx::Error> {
     match sqlx::query_as::<_, Device>(
@@ -17,7 +17,10 @@ pub async fn get_device_list(pool: &Pool<Sqlite>) -> Result<Vec<Device>, sqlx::E
     }
 }
 
-pub async fn create_device(pool: &Pool<Sqlite>, device: &DeviceDto) -> Result<i64, sqlx::Error> {
+pub async fn create_device(
+    pool: &Pool<Sqlite>,
+    device: &CreateDeviceDto,
+) -> Result<i64, sqlx::Error> {
     let mut qb = QueryBuilder::new("INSERT INTO DEVICE(mac, ip");
     if device.name.is_some() {
         qb.push(", name");
@@ -78,7 +81,7 @@ pub async fn create_device(pool: &Pool<Sqlite>, device: &DeviceDto) -> Result<i6
 pub async fn update_device(
     pool: &Pool<Sqlite>,
     id: i64,
-    device: &DeviceDto,
+    device: &UpdateDeviceDto,
 ) -> Result<Option<i64>, sqlx::Error> {
     let mut qb = QueryBuilder::new("UPDATE device SET ip = ");
     qb.push_bind(&device.ip);

@@ -1,4 +1,4 @@
-use super::dto::DeviceDto;
+use super::dto::{CreateDeviceDto, UpdateDeviceDto};
 use super::model::Device;
 use super::repository;
 use sqlx::{Pool, Sqlite};
@@ -13,14 +13,14 @@ pub async fn get_device_list(pool: &Pool<Sqlite>) -> Option<(u64, Vec<Device>)> 
     }
 }
 
-pub async fn add_device(pool: &Pool<Sqlite>, device: DeviceDto) -> Option<i64> {
+pub async fn add_device(pool: &Pool<Sqlite>, device: CreateDeviceDto) -> Option<i64> {
     repository::create_device(pool, &device)
         .await
         .map(Some)
         .unwrap_or(None)
 }
 
-pub async fn update_device(pool: &Pool<Sqlite>, id: i64, device: DeviceDto) -> Option<i64> {
+pub async fn update_device(pool: &Pool<Sqlite>, id: i64, device: UpdateDeviceDto) -> Option<i64> {
     repository::update_device(pool, id, &device)
         .await
         .ok()
@@ -35,12 +35,12 @@ pub async fn get_device(pool: &Pool<Sqlite>, id: i64) -> Option<Device> {
     repository::get_device(pool, id).await.unwrap_or(None)
 }
 
-pub async fn sync_device(pool: &Pool<Sqlite>, device: DeviceDto) -> Option<i64> {
+pub async fn sync_device(pool: &Pool<Sqlite>, device: CreateDeviceDto) -> Option<i64> {
     match repository::get_device_by_mac(pool, &device.mac)
         .await
         .unwrap_or(None)
     {
-        Some(id) => repository::update_device(pool, id, &device)
+        Some(id) => repository::update_device(pool, id, &UpdateDeviceDto::from(device))
             .await
             .ok()
             .unwrap(),

@@ -1,4 +1,4 @@
-use super::dto::{DeviceDto, DeviceVo};
+use super::dto::{CreateDeviceDto, DeviceVo, UpdateDeviceDto};
 use super::service;
 use crate::state::AppState;
 use axum::{
@@ -30,7 +30,7 @@ pub async fn get_device_list(State(state): State<AppState>) -> Json<Value> {
 
 pub async fn create_device(
     State(state): State<AppState>,
-    Json(device): Json<DeviceDto>,
+    Json(device): Json<CreateDeviceDto>,
 ) -> Result<Json<Value>, StatusCode> {
     if let Some(id) = service::add_device(&state.pool, device).await {
         Ok(Json(serde_json::json!({
@@ -43,7 +43,7 @@ pub async fn create_device(
 
 pub async fn sync_device(
     State(state): State<AppState>,
-    Form(form): Form<DeviceDto>,
+    Form(form): Form<CreateDeviceDto>,
 ) -> Result<Json<Value>, StatusCode> {
     match service::sync_device(&state.pool, form).await {
         Some(id) => Ok(Json(serde_json::json!({
@@ -68,7 +68,7 @@ pub async fn delete_device(State(state): State<AppState>, Path(id): Path<i64>) -
 pub async fn update_device(
     State(state): State<AppState>,
     Path(id): Path<i64>,
-    Json(device): Json<DeviceDto>,
+    Json(device): Json<UpdateDeviceDto>,
 ) -> Result<Json<Value>, StatusCode> {
     if let Some(_) = service::update_device(&state.pool, id, device).await {
         Ok(Json(serde_json::json!({
