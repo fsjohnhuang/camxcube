@@ -65,6 +65,20 @@ pub async fn delete_device(State(state): State<AppState>, Path(id): Path<i64>) -
     }
 }
 
+pub async fn update_device(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(device): Json<DeviceDto>,
+) -> Result<Json<Value>, StatusCode> {
+    if let Some(_) = service::update_device(&state.pool, id, device).await {
+        Ok(Json(serde_json::json!({
+            "id": id,
+        })))
+    } else {
+        Err(StatusCode::NOT_FOUND)
+    }
+}
+
 pub async fn get_device(
     State(state): State<AppState>,
     Path(id): Path<i64>,

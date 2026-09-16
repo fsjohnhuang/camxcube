@@ -2,6 +2,7 @@ mod config;
 mod state;
 
 mod device;
+mod file;
 
 use axum::Router;
 use axum_vite::{ViteConfig, spa_router};
@@ -28,8 +29,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let app = Router::new()
         .merge(spa_router(vite_config))
-        // .nest("/api", routes::routes())
         .nest("/api/devices", device::route())
+        .nest("/api/files", file::route())
         .with_state(state::state(config, pool));
 
     // Bind to all interfaces on specified port

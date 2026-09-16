@@ -12,7 +12,7 @@ pub struct DeviceDto {
     pub status: Option<u8>,
     pub battery: Option<u8>,
     pub location: Option<String>,
-    pub synced_at: Option<u64>, // ms
+    pub synced_at: Option<u32>, // ms
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -25,7 +25,7 @@ pub struct DeviceVo {
     pub status: u8,
     pub battery: Option<u8>,
     pub location: Option<String>,
-    pub synced_at: Option<u64>, // ms
+    pub synced_at: Option<u32>, // ms
     pub created_at: DateTime<Utc>,
     pub updated_at: Option<DateTime<Utc>>,
 }

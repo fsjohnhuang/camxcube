@@ -20,6 +20,13 @@ pub async fn add_device(pool: &Pool<Sqlite>, device: DeviceDto) -> Option<i64> {
         .unwrap_or(None)
 }
 
+pub async fn update_device(pool: &Pool<Sqlite>, id: i64, device: DeviceDto) -> Option<i64> {
+    repository::update_device(pool, id, &device)
+        .await
+        .ok()
+        .unwrap_or(None)
+}
+
 pub async fn delete_device(pool: &Pool<Sqlite>, id: i64) -> Option<u64> {
     repository::delete_device(pool, id).await.unwrap_or(None)
 }
