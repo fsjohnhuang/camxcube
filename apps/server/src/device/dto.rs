@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::model::Device;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 pub struct CreateDeviceDto {
     pub mac: String,
     pub ip: String,
@@ -15,7 +15,7 @@ pub struct CreateDeviceDto {
     pub synced_at: Option<u32>, // ms
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 pub struct UpdateDeviceDto {
     pub mac: Option<String>,
     pub ip: Option<String>,

@@ -1,8 +1,8 @@
-mod dto;
+pub mod dto;
 mod handler;
-mod model;
+pub mod model;
 mod repository;
 mod route;
-mod service;
+pub mod service;
 
 pub use route::route;

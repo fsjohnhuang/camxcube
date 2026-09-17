@@ -1,13 +1,15 @@
+use std::{fs::File, io::Write};
+
 use axum::{
-    extract::{Path, State},
-    http::StatusCode,
     Json,
+    extract::{Multipart, Path, Query, State},
+    http::StatusCode,
 };
 use serde_json::Value;
 
 use crate::state::AppState;
 
-pub async fn create(
+pub async fn create_file(
     State(state): State<AppState>,
     Json(dto): Json<super::dto::CreateFileDto>,
 ) -> Result<Json<Value>, StatusCode> {
@@ -18,6 +20,56 @@ pub async fn create(
     Ok(Json(serde_json::json!({
         "id": id,
     })))
+}
+
+pub async fn upload(
+    State(state): State<AppState>,
+    Query(mac): Query<String>,
+    Query(ip): Query<String>,
+    Query(synced_at): Query<u32>,
+    mut multipart: Multipart,
+) -> Result<Json<Value>, StatusCode> {
+    match super::super::device::service::sync_device(
+        &state.pool,
+        super::super::device::dto::CreateDeviceDto {
+            mac: mac,
+            ip: ip,
+            synced_at: Some(synced_at),
+            ..Default::default()
+        },
+    )
+    .await
+    {
+        Some(id) => {
+            while let Some(mut field) = multipart
+                .next_field()
+                .await
+                .map_err(|_| StatusCode::BAD_REQUEST)?
+            {
+                let name = field.name().unwrap_or("unnamed").to_string();
+
+                match field.file_name() {
+                    Some(filename) => {
+                        let mut file =
+                            File::create(format!("{}/{}", state.config.image_folder, filename))
+                                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                        while let Some(chunk) =
+                            field.chunk().await.map_err(|_| StatusCode::BAD_REQUEST)?
+                        {
+                            file.write_all(&chunk)
+                                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                        }
+                    }
+                    None => {
+                        let text = field.text().await.map_err(|_| StatusCode::BAD_REQUEST)?;
+                        println!("name: {}, text: {}", name, text);
+                    }
+                }
+            }
+            Ok(Json(serde_json::json!({})))
+        }
+        None => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
 }
 
 pub async fn get_file(
