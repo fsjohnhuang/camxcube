@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         //The value of the 'Access-Control-Allow-Credentials' header in the response is '' which must be 'true' when the request's credentials mode is 'include'.
         .allow_credentials(true)
         //Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *`
-        .allow_methods([Method::POST])
+        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::PUT])
         //Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *`
         .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
 
