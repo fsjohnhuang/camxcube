@@ -5,6 +5,7 @@ import DevicesPage from "./pages/DevicesPage";
 import EditDevicePage from "./pages/EditDevicePage";
 import GalleryPage from "./pages/GalleryPage";
 import SettingsPage from "./pages/SettingsPage";
+import BleScanPage from "./pages/BleScanPage";
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
           <Route path="/devices/:id/edit" element={<EditDevicePage />} />
           <Route path="/gallery" element={<GalleryPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/ble-scan" element={<BleScanPage />} />
         </Routes>
       </Layout>
     </BrowserRouter>
