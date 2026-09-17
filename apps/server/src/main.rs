@@ -4,11 +4,15 @@ mod state;
 mod device;
 mod file;
 
-use axum::Router;
+use axum::{
+    Router,
+    http::{HeaderValue, Method, header},
+};
 use axum_vite::{ViteConfig, spa_router};
 use sqlx::{Sqlite, migrate::MigrateDatabase, sqlite::SqlitePoolOptions};
 use std::net::SocketAddr;
 use tokio::signal;
+use tower_http::cors::CorsLayer;
 
 use crate::config::Config;
 
@@ -27,11 +31,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .connect(&config.database_url)
         .await?;
 
+    let cors = CorsLayer::new()
+        //Response to preflight request doesn't pass access control check: The value of the 'Access-Control-Allow-Origin' header in the response must not be the wildcard '*' when the request's credentials mode is 'include'.
+        .allow_origin("http://localhost:5173".parse::<HeaderValue>().unwrap())
+        //The value of the 'Access-Control-Allow-Credentials' header in the response is '' which must be 'true' when the request's credentials mode is 'include'.
+        .allow_credentials(true)
+        //Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Methods: *`
+        .allow_methods([Method::POST])
+        //Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Headers: *`
+        .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
+
     let app = Router::new()
         .merge(spa_router(vite_config))
         .nest("/api/devices", device::route())
         .nest("/api/files", file::route())
-        .with_state(state::state(config, pool));
+        .with_state(state::state(config, pool))
+        .layer(cors);
 
     // Bind to all interfaces on specified port
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
