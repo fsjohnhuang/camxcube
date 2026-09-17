@@ -18,7 +18,8 @@ CREATE TABLE device (
 CREATE TABLE file (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     device_id INTEGER NOT NULL,
-    path TEXT NOT NULL,
+    physical_path TEXT NOT NULL,
+    original_name TEXT NOT NULL,
     mime_type TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (device_id) REFERENCES device(id)

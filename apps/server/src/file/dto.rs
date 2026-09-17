@@ -6,3 +6,10 @@ pub struct CreateFileDto {
     pub path: String,
     pub mime_type: String,
 }
+
+#[derive(Debug, serde::Deserialize, Default)]
+pub struct UploadQuery {
+    pub mac: String,
+    pub ip: String,
+    pub synced_at: Option<u32>,
+}

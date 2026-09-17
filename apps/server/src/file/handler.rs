@@ -1,9 +1,13 @@
-use std::{fs::File, io::Write};
+use std::path;
+use tokio::{fs::File, io::AsyncWriteExt};
+use tokio_util::io::ReaderStream;
 
 use axum::{
     Json,
+    body::Body,
     extract::{Multipart, Path, Query, State},
-    http::StatusCode,
+    http::{StatusCode, header},
+    response::Response,
 };
 use serde_json::Value;
 
@@ -24,41 +28,62 @@ pub async fn create_file(
 
 pub async fn upload(
     State(state): State<AppState>,
-    Query(mac): Query<String>,
-    Query(ip): Query<String>,
-    Query(synced_at): Query<u32>,
+    Query(query): Query<super::dto::UploadQuery>,
     mut multipart: Multipart,
 ) -> Result<Json<Value>, StatusCode> {
+    println!("{}", "123");
     match super::super::device::service::sync_device(
         &state.pool,
         super::super::device::dto::CreateDeviceDto {
-            mac: mac,
-            ip: ip,
-            synced_at: Some(synced_at),
+            mac: query.mac,
+            ip: query.ip,
+            synced_at: query.synced_at,
             ..Default::default()
         },
     )
     .await
     {
-        Some(id) => {
+        Some(device_id) => {
+            let mut file_ids = Vec::<i64>::new();
             while let Some(mut field) = multipart
                 .next_field()
                 .await
                 .map_err(|_| StatusCode::BAD_REQUEST)?
             {
                 let name = field.name().unwrap_or("unnamed").to_string();
-
                 match field.file_name() {
                     Some(filename) => {
-                        let mut file =
-                            File::create(format!("{}/{}", state.config.image_folder, filename))
+                        let path_buf =
+                            path::absolute(format!("{}/{}", state.config.image_folder, filename))
                                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+                        let mime = mime_guess::from_path(&path_buf)
+                            .first_or_octet_stream()
+                            .to_string();
+
+                        let abs = path_buf.to_str().ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+
+                        let mut file = File::create(abs)
+                            .await
+                            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
                         while let Some(chunk) =
                             field.chunk().await.map_err(|_| StatusCode::BAD_REQUEST)?
                         {
                             file.write_all(&chunk)
+                                .await
                                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
                         }
+
+                        match super::service::create_file(&state.pool, device_id, abs, &mime).await
+                        {
+                            Ok(file_id) => file_ids.push(file_id),
+                            Err(e) => {
+                                eprintln!("{}", e);
+
+                                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                            }
+                        };
                     }
                     None => {
                         let text = field.text().await.map_err(|_| StatusCode::BAD_REQUEST)?;
@@ -66,9 +91,15 @@ pub async fn upload(
                     }
                 }
             }
-            Ok(Json(serde_json::json!({})))
+
+            Ok(Json(serde_json::json!({
+                "ids": file_ids
+            })))
         }
-        None => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        None => {
+            print!("{}", "c");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
     }
 }
 
@@ -84,6 +115,30 @@ pub async fn get_file(
             "mime_type": file.mime_type,
             "created_at": file.created_at,
         }))),
+        Ok(None) => Err(StatusCode::NOT_FOUND),
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+pub async fn get_file_stream(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Response, StatusCode> {
+    match super::service::get_file(&state.pool, id).await {
+        Ok(Some(file)) => {
+            let file = File::open(file.path)
+                .await
+                .map_err(|_| StatusCode::NOT_FOUND)?;
+
+            let stream = ReaderStream::new(file);
+            let body = Body::from_stream(stream);
+
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "image/jpeg")
+                .body(body)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+        }
         Ok(None) => Err(StatusCode::NOT_FOUND),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }

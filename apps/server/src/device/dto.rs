@@ -17,7 +17,6 @@ pub struct CreateDeviceDto {
 
 #[derive(Debug, Deserialize, Default)]
 pub struct UpdateDeviceDto {
-    pub mac: Option<String>,
     pub ip: Option<String>,
     pub name: Option<String>,
     pub description: Option<String>,
@@ -30,7 +29,6 @@ pub struct UpdateDeviceDto {
 impl From<CreateDeviceDto> for UpdateDeviceDto {
     fn from(value: CreateDeviceDto) -> Self {
         UpdateDeviceDto {
-            mac: Some(value.mac),
             ip: Some(value.ip),
             name: value.name,
             description: value.description,
