@@ -2,12 +2,13 @@ use sqlx::{Pool, Sqlite};
 
 use super::model::File;
 
-pub async fn create(pool: &Pool<Sqlite>, device_id: i64, path: &str, mime_type: &str) -> Result<i64, sqlx::Error> {
+pub async fn create(pool: &Pool<Sqlite>, device_id: i64, physical_path: &str, original_name: &str, mime_type: &str) -> Result<i64, sqlx::Error> {
     let result = sqlx::query(
-        "INSERT INTO file (device_id, path, mime_type) VALUES (?, ?, ?)",
+        "INSERT INTO file (device_id, physical_path, original_name, mime_type) VALUES (?, ?, ?, ?)",
     )
     .bind(device_id)
-    .bind(path)
+    .bind(physical_path)
+    .bind(original_name)
     .bind(mime_type)
     .execute(pool)
     .await?;
@@ -17,7 +18,7 @@ pub async fn create(pool: &Pool<Sqlite>, device_id: i64, path: &str, mime_type: 
 
 pub async fn get_file(pool: &Pool<Sqlite>, id: i64) -> Result<Option<File>, sqlx::Error> {
     sqlx::query_as::<_, File>(
-        "SELECT id, device_id, path, mime_type, created_at FROM file WHERE id = ?",
+        "SELECT id, device_id, physical_path, original_name, mime_type, created_at FROM file WHERE id = ?",
     )
     .bind(id)
     .fetch_optional(pool)
@@ -26,7 +27,7 @@ pub async fn get_file(pool: &Pool<Sqlite>, id: i64) -> Result<Option<File>, sqlx
 
 pub async fn get_file_list(pool: &Pool<Sqlite>) -> Result<Vec<File>, sqlx::Error> {
     sqlx::query_as::<_, File>(
-        "SELECT id, device_id, path, mime_type, created_at FROM file",
+        "SELECT id, device_id, physical_path, original_name, mime_type, created_at FROM file",
     )
     .fetch_all(pool)
     .await

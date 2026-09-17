@@ -17,9 +17,15 @@ pub async fn create_file(
     State(state): State<AppState>,
     Json(dto): Json<super::dto::CreateFileDto>,
 ) -> Result<Json<Value>, StatusCode> {
-    let id = super::service::create_file(&state.pool, dto.device_id, &dto.path, &dto.mime_type)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let id = super::service::create_file(
+        &state.pool,
+        dto.device_id,
+        &dto.physical_path,
+        &dto.original_name,
+        &dto.mime_type,
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(serde_json::json!({
         "id": id,
@@ -31,7 +37,6 @@ pub async fn upload(
     Query(query): Query<super::dto::UploadQuery>,
     mut multipart: Multipart,
 ) -> Result<Json<Value>, StatusCode> {
-    println!("{}", "123");
     match super::super::device::service::sync_device(
         &state.pool,
         super::super::device::dto::CreateDeviceDto {
@@ -53,9 +58,19 @@ pub async fn upload(
                 let name = field.name().unwrap_or("unnamed").to_string();
                 match field.file_name() {
                     Some(filename) => {
-                        let path_buf =
-                            path::absolute(format!("{}/{}", state.config.image_folder, filename))
-                                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                        let filename = filename.to_string();
+                        let ext = path::Path::new(&filename)
+                            .extension()
+                            .map_or("", |v| v.to_str().unwrap_or(""));
+                        let now_utc = chrono::Utc::now();
+                        let name = now_utc.format("%Y%m%d").to_string();
+
+                        let path_buf = path::absolute(if ext != "" {
+                            format!("{}/{}.{}", state.config.image_folder, name, ext)
+                        } else {
+                            format!("{}/{}", state.config.image_folder, name)
+                        })
+                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
                         let mime = mime_guess::from_path(&path_buf)
                             .first_or_octet_stream()
@@ -75,7 +90,14 @@ pub async fn upload(
                                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
                         }
 
-                        match super::service::create_file(&state.pool, device_id, abs, &mime).await
+                        match super::service::create_file(
+                            &state.pool,
+                            device_id,
+                            abs,
+                            &filename,
+                            &mime,
+                        )
+                        .await
                         {
                             Ok(file_id) => file_ids.push(file_id),
                             Err(e) => {
@@ -111,7 +133,8 @@ pub async fn get_file(
         Ok(Some(file)) => Ok(Json(serde_json::json!({
             "id": file.id,
             "device_id": file.device_id,
-            "path": file.path,
+            "physical_path": file.physical_path,
+            "original_name": file.original_name,
             "mime_type": file.mime_type,
             "created_at": file.created_at,
         }))),
@@ -126,7 +149,7 @@ pub async fn get_file_stream(
 ) -> Result<Response, StatusCode> {
     match super::service::get_file(&state.pool, id).await {
         Ok(Some(file)) => {
-            let file = File::open(file.path)
+            let file = File::open(file.physical_path)
                 .await
                 .map_err(|_| StatusCode::NOT_FOUND)?;
 
@@ -153,7 +176,8 @@ pub async fn get_file_list(State(state): State<AppState>) -> Json<Value> {
                     serde_json::json!({
                         "id": f.id,
                         "device_id": f.device_id,
-                        "path": f.path,
+                        "physical_path": f.physical_path,
+                        "original_name": f.original_name,
                         "mime_type": f.mime_type,
                         "created_at": f.created_at,
                     })
