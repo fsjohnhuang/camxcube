@@ -130,16 +130,12 @@ pub async fn update_device(
 }
 
 pub async fn delete_device(pool: &Pool<Sqlite>, id: i64) -> Result<Option<u64>, sqlx::Error> {
-    match sqlx::query("update device set status = 0 where id = ?")
+    match sqlx::query("DELETE FROM device WHERE id = ?")
         .bind(id)
         .execute(pool)
         .await
     {
-        Ok(result) => Ok(if result.rows_affected() == 0 {
-            Some(result.rows_affected())
-        } else {
-            None
-        }),
+        Ok(result) => Ok(Some(result.rows_affected())),
         Err(e) => {
             eprintln!("SQLx error: {:?}", e);
             Err(e)
