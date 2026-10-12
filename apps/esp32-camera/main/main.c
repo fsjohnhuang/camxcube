@@ -1,154 +1,300 @@
-// #include "sdkconfig.h"
+#include <stdio.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
-#include "nvs.h"
-#include "wifi.h"
-#include "http_client.h"
-#include "http_server.h"
-#include "camera.h"
-#include "ntp.h"
+#include "esp_bt.h"              // 蓝牙控制器底层 API
+#include "esp_bt_main.h"         // Bluedroid 协议栈初始化
+#include "esp_gap_ble_api.h"     // GAP 层：广播、扫描、连接
+#include "esp_gatts_api.h"       // GATTS 层：服务、特征值、描述符
+#include "esp_gatt_common_api.h" // GATT 通用 API（如设置 MTU）
 
-static const char *TAG = "MAIN";
+static const char *TAG = "BLE_EXAMPLE"; // 日志标签
 
-typedef struct cmd_t {
-	uint8_t times;
-	uint8_t id;
-	uint8_t type;
-} cmd_t;
+/* ============================================================
+ * 自定义 UUID
+ * 注意：这里用宏定义 UUID，在属性表中取地址会报错（见之前讨论）。
+ *       实际项目应改为 static const uint16_t 变量，或使用 128 位 UUID。
+ * ============================================================ */
+#define SERVICE_UUID 0x00FF // 自定义服务 UUID
+#define CHAR_RX_UUID 0xFF01 // 手机写入数据的特征值
+#define CHAR_TX_UUID 0xFF02 // ESP32-S3 通知数据的特征值
 
+/* ============================================================
+ * 属性表索引
+ * 属性表是一个数组，每个元素对应一个属性（服务/特征声明/特征值/描述符）。
+ * 用枚举定义索引，方便代码中按名字访问 handle_table[]。
+ * ============================================================ */
+enum
+{
+    IDX_SVC,          // 服务声明
+    IDX_CHAR_RX_DECL, // RX 特征声明
+    IDX_CHAR_RX_VAL,  // RX 特征值（手机写入）
+    IDX_CHAR_TX_DECL, // TX 特征声明
+    IDX_CHAR_TX_VAL,  // TX 特征值（ESP32-S3 通知）
+    IDX_CHAR_TX_CFG,  // TX 的 CCC 描述符（控制通知开关）
+    IDX_NB,           // 属性总数
+};
 
-QueueHandle_t queueMsg = NULL;
+/* ============================================================
+ * 全局状态变量
+ * ============================================================ */
+static uint16_t handle_table[IDX_NB];             // 保存每个属性在协议栈中的句柄
+static esp_gatt_if_t gatts_if = ESP_GATT_IF_NONE; // GATT 接口号，注册后由协议栈分配
+static uint16_t conn_id = 0;                      // 当前连接 ID，0 表示未连接
+static bool notify_enabled = false;               // 手机是否已开启通知订阅
 
-void task_http_client(void *ptr) {
-	const uint16_t ms = 1000;
-	while(1) {
-		struct cmd_t *cmd = NULL;
-		if (xQueueReceive(queueMsg, &cmd, portMAX_DELAY) != pdPASS) {
-			ESP_LOGI(TAG, "Queue is empty");
-		}
+// 通知特征值的本地缓存
+static uint8_t tx_value[20] = {0};
+static uint8_t tx_value_len = 0;
 
-		if (cmd->type == 1) {
-			uint8_t times = cmd->times;
-			while (times > 0) {
-				times -= 1;
-				ESP_LOGI(TAG, "Task: take a shot");
-				camera_capture(http_client_upload);
-				vTaskDelay(pdMS_TO_TICKS(200));
-			}
-		}
+/* ============================================================
+ * 属性表基础 UUID
+ * 这些是蓝牙规范中固定的 UUID，用变量定义以便取地址。
+ * ============================================================ */
+static const uint16_t primary_service_uuid = ESP_GATT_UUID_PRI_SERVICE;                // 0x2800
+static const uint16_t character_declaration_uuid = ESP_GATT_UUID_CHAR_DECLARE;         // 0x2803
+static const uint16_t character_client_config_uuid = ESP_GATT_UUID_CHAR_CLIENT_CONFIG; // 0x2902
 
-		// esp_err_t err = http_client_heart_beat();
-		// if (err != ESP_OK) {
-		// 	// what is esp_err_to_name_r for?
-		// 	ESP_LOGE(TAG, "Fail to fire heart beat request, due to %s\n", esp_err_to_name(err));
-		// }
+// 特征属性：RX 可写，TX 支持通知
+static const uint8_t char_prop_write = ESP_GATT_CHAR_PROP_BIT_WRITE;   // 0x08
+static const uint8_t char_prop_notify = ESP_GATT_CHAR_PROP_BIT_NOTIFY; // 0x10
 
-		vTaskDelay(pdMS_TO_TICKS(ms));
-	}
+// 特征值初始数据
+static uint8_t rx_value[500] = {0};         // RX 特征值的缓冲区
+static uint8_t ccc_value[2] = {0x00, 0x00}; // CCC 默认值：通知关闭
 
-	/**
-	 * FreeRTOS每个任务中返回是非法行为，会导致系统崩溃。
-	 * (报异常 `E (2746) FreeRTOS: FreeRTOS Task "xxx" should not return, Aborting now!`)
-	 * 因此只有两种选择
-	 * 1. 通过死循环让任务永不结束;
-	 * 2. 杀死任务本身，而不是返回。
-	 */
-	vTaskDelete(NULL); 
+/* ============================================================
+ * GATT 属性表
+ * 这是整个 BLE 服务的核心定义。每个条目描述一个属性的：
+ *   - 响应方式（ESP_GATT_AUTO_RSP 表示协议栈自动回复读/写请求）
+ *   - UUID 长度和内容
+ *   - 访问权限（读/写）
+ *   - 值长度和初始值
+ * ============================================================ */
+static const esp_gatts_attr_db_t gatt_db[IDX_NB] = {
+    // ---- 服务声明 (0x2800) ----
+    [IDX_SVC] = {
+        {ESP_GATT_AUTO_RSP}, {
+                                 ESP_UUID_LEN_16, (uint8_t *)&primary_service_uuid, // UUID: 0x2800
+                                 ESP_GATT_PERM_READ,                                // 权限：可读
+                                 sizeof(uint16_t), sizeof(SERVICE_UUID),            // 值长度
+                                 (uint8_t *)&SERVICE_UUID                           // 服务 UUID 值
+                             }},
+    // ---- RX 特征声明 (0x2803) ----
+    // 声明这是一个特征，属性为 Write
+    [IDX_CHAR_RX_DECL] = {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&character_declaration_uuid, ESP_GATT_PERM_READ, sizeof(uint8_t), sizeof(char_prop_write), (uint8_t *)&char_prop_write}},
+    // ---- RX 特征值 ----
+    // 手机通过写入这个特征值向 ESP32-S3 发送数据
+    [IDX_CHAR_RX_VAL] = {{ESP_GATT_AUTO_RSP}, {
+                                                  ESP_UUID_LEN_16, (uint8_t *)&CHAR_RX_UUID, // UUID: 0xFF01
+                                                  ESP_GATT_PERM_WRITE,                       // 权限：可写
+                                                  sizeof(rx_value), 0, rx_value              // 最大长度 500，初始长度 0
+                                              }},
+    // ---- TX 特征声明 (0x2803) ----
+    // 声明这是一个特征，属性为 Notify
+    [IDX_CHAR_TX_DECL] = {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&character_declaration_uuid, ESP_GATT_PERM_READ, sizeof(uint8_t), sizeof(char_prop_notify), (uint8_t *)&char_prop_notify}},
+    // ---- TX 特征值 ----
+    // ESP32-S3 通过这个特征值向手机推送通知
+    [IDX_CHAR_TX_VAL] = {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&CHAR_TX_UUID, // UUID: 0xFF02
+                                               ESP_GATT_PERM_READ,                        // 权限：可读
+                                               sizeof(tx_value), sizeof(tx_value), tx_value}},
+    // ---- CCC 描述符 (0x2902) ----
+    // 手机通过写入这个描述符来开启/关闭通知
+    // 0x0001 = 开启通知, 0x0000 = 关闭
+    [IDX_CHAR_TX_CFG] = {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&character_client_config_uuid,
+                                               ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE, // 可读可写
+                                               sizeof(uint16_t), sizeof(ccc_value), ccc_value}},
+};
+
+/* ============================================================
+ * GAP 广播数据
+ * 格式：长度 + 类型 + 数据
+ *   0x02 0x01 0x06  → Flags: LE General Discoverable, BR/EDR Not Supported
+ *   0x09 0x09 ...   → Complete Local Name: "BLE_DEMO"
+ * ============================================================ */
+static uint8_t adv_data[] = {
+    0x02, 0x01, 0x06,
+    0x09, 0x09, 'B', 'L', 'E', '_', 'D', 'E', 'M', 'O'};
+
+// 广播参数
+static esp_ble_adv_params_t adv_params = {
+    .adv_int_min = 0x20,      // 最小广播间隔 (20ms)
+    .adv_int_max = 0x40,      // 最大广播间隔 (40ms)
+    .adv_type = ADV_TYPE_IND, // 可连接的非定向广播
+    .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
+    .channel_map = ADV_CHNL_ALL,                            // 使用所有 3 个广播信道
+    .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY, // 允许任何人扫描/连接
+};
+
+/* ============================================================
+ * 发送通知数据
+ * 先更新本地特征值缓存，再通过协议栈发送 Notify。
+ * need_confirm = false 表示 Notify（无确认），true 则为 Indicate（有确认）。
+ * ============================================================ */
+static void send_notify_data(const uint8_t *data, uint16_t len)
+{
+    if (!notify_enabled || gatts_if == ESP_GATT_IF_NONE)
+        return; // 未订阅或未连接则直接返回
+
+    // 更新本地特征值（保持本地与协议栈数据一致）
+    esp_ble_gatts_set_attr_value(handle_table[IDX_CHAR_TX_VAL], len, data);
+
+    // 发送通知给手机
+    esp_ble_gatts_send_indicate(gatts_if, conn_id,
+                                handle_table[IDX_CHAR_TX_VAL],
+                                len, (uint8_t *)data, false);
 }
 
-esp_err_t index_handler(httpd_req_t *req) {
-	struct cmd_t *cmd = malloc(sizeof(cmd_t));
-	cmd->id = 1;
-	cmd->type = 1;
-	cmd->times = 1;
-
-	/**
-	 * get query parameters
-	 */
-	char query_buf[256];
-	char param_buf[64];
-	/**
-	 * ESP_ERR_NOT_FOUND - query string not found.
-	 */
-	esp_err_t err = httpd_req_get_url_query_str(req, query_buf, sizeof(query_buf));
-	if (err == ESP_OK) {
-		ESP_LOGI(TAG, "query_buf: %s", query_buf);
-		/**
-		 * `httpd_query_key_value` does not URL-decode the value.
-		 */
-		if (httpd_query_key_value(query_buf, "id", param_buf, sizeof(param_buf)) == ESP_OK) {
-			cmd->id = (uint8_t)atoi(param_buf);
-		}
-		if (httpd_query_key_value(query_buf, "type", param_buf, sizeof(param_buf)) == ESP_OK) {
-			cmd->type = (uint8_t)atoi(param_buf);
-		}
-		if (httpd_query_key_value(query_buf, "times", param_buf, sizeof(param_buf)) == ESP_OK) {
-			cmd->times = (uint8_t)atoi(param_buf);
-		}
-	}
-	else {
-		ESP_LOGW(TAG, "query_buf error: %s", esp_err_to_name(err));
-	}
-
-	if (xQueueSend(queueMsg, (void *)&cmd, portMAX_DELAY) != pdPASS) {
-		ESP_LOGI(TAG, "Queue is full");
-	}
-
-    const char html[] = "<html><body>ESP32</body></html";
-    // 设置响应头（可选）
-    httpd_resp_set_type(req, "text/plain");
-
-    httpd_resp_send(req, html, strlen(html));
-
-    return ESP_OK;
+/* ============================================================
+ * 通知发送任务
+ * 每秒向手机推送一条 "Count: N" 消息，用于演示 Notify 功能。
+ * ============================================================ */
+static void notify_task(void *arg)
+{
+    uint32_t counter = 0;
+    while (1)
+    {
+        if (notify_enabled && conn_id != 0)
+        {
+            char msg[64];
+            int len = snprintf(msg, sizeof(msg), "Count: %lu", counter++);
+            send_notify_data((uint8_t *)msg, len);
+            ESP_LOGI(TAG, "Notified: %s", msg);
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000)); // 延时 1 秒
+    }
 }
 
-esp_err_t http_server_start(void) {
-	httpd_handle_t server = NULL;
-    esp_err_t err = http_server_init(&server);
-	if (err != ESP_OK) return err;
+/* ============================================================
+ * GATTS 事件回调
+ * 处理服务注册、属性表创建、连接、断开、写入、MTU 更新等事件。
+ * ============================================================ */
+static void gatts_event_handler(esp_gatts_cb_event_t event,
+                                esp_gatt_if_t gatts_if_param,
+                                esp_ble_gatts_cb_param_t *param)
+{
+    switch (event)
+    {
+    // ---- 应用注册完成 ----
+    case ESP_GATTS_REG_EVT:
+        ESP_LOGI(TAG, "REGISTER_APP_EVT");
+        gatts_if = gatts_if_param;                                         // 保存接口号
+        esp_ble_gap_set_device_name("BLE_DEMO");                           // 设置设备名
+        esp_ble_gap_config_adv_data_raw(adv_data, sizeof(adv_data));       // 配置广播数据
+        esp_ble_gatts_create_attr_tab(gatt_db, gatts_if_param, IDX_NB, 0); // 创建属性表
+        break;
 
-	const httpd_uri_t index_uri = {
-        .uri = "/index",
-        .method = HTTP_GET,
-        .handler = index_handler,
-        .user_ctx = NULL
-    };
-	/**
-	 * `ESP_ERR_INVALID_ARG` error occurs when the parameter `server` is NULL.
-	 */
-    err = httpd_register_uri_handler(server, &index_uri);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "URI register failed: %s", esp_err_to_name(err));
-        httpd_stop(server);
-        return err;
+    // ---- 属性表创建完成 ----
+    case ESP_GATTS_CREAT_ATTR_TAB_EVT:
+        ESP_LOGI(TAG, "ATTR_TAB_CREATED, handles=%d", param->add_attr_tab.num_handle);
+        memcpy(handle_table, param->add_attr_tab.handles, sizeof(handle_table)); // 保存句柄
+        esp_ble_gatts_start_service(handle_table[IDX_SVC]);                      // 启动服务
+        break;
+
+    // ---- 服务启动完成 ----
+    case ESP_GATTS_START_EVT:
+        ESP_LOGI(TAG, "SERVICE_STARTED");
+        esp_ble_gap_start_advertising(&adv_params); // 开始广播
+        break;
+
+    // ---- 手机连接 ----
+    case ESP_GATTS_CONNECT_EVT:
+        ESP_LOGI(TAG, "CLIENT_CONNECTED, conn_id=%d", param->connect.conn_id);
+        conn_id = param->connect.conn_id; // 保存连接 ID
+        esp_ble_gatt_set_local_mtu(200);  // 请求 MTU 200，提升传输效率
+        break;
+
+    // ---- 手机断开连接 ----
+    case ESP_GATTS_DISCONNECT_EVT:
+        ESP_LOGI(TAG, "CLIENT_DISCONNECTED");
+        notify_enabled = false; // 重置通知状态
+        conn_id = 0;
+        esp_ble_gap_start_advertising(&adv_params); // 重新开始广播，等待下次连接
+        break;
+
+    // ---- 手机写入数据 ----
+    case ESP_GATTS_WRITE_EVT:
+    {
+        uint16_t handle = param->write.handle;
+        uint16_t len = param->write.len;
+        uint8_t *value = param->write.value;
+
+        // 判断写的是 CCC 描述符（开启/关闭通知）
+        if (handle == handle_table[IDX_CHAR_TX_CFG] && len == 2)
+        {
+            uint16_t ccc = value[1] << 8 | value[0]; // 小端序拼接
+            notify_enabled = (ccc & 0x0001);         // bit0 = 1 表示开启通知
+            ESP_LOGI(TAG, "Notify %s", notify_enabled ? "ENABLED" : "DISABLED");
+        }
+        // 判断写的是 RX 特征值（手机发来的数据）
+        else if (handle == handle_table[IDX_CHAR_RX_VAL])
+        {
+            ESP_LOGI(TAG, "RX DATA: %.*s", len, (char *)value); // 打印接收到的数据
+            // TODO: 在这里处理手机发来的业务数据
+        }
+
+        // 如果客户端要求响应，则发送写响应
+        if (param->write.need_rsp)
+        {
+            esp_ble_gatts_send_response(gatts_if_param, param->write.conn_id,
+                                        param->write.trans_id,
+                                        ESP_GATT_OK, NULL);
+        }
+        break;
     }
 
-	return err;
+    // ---- MTU 协商完成 ----
+    case ESP_GATTS_MTU_EVT:
+        ESP_LOGI(TAG, "MTU_UPDATED: %d", param->mtu.mtu);
+        break;
+
+    default:
+        break;
+    }
 }
 
+/* ============================================================
+ * GAP 事件回调
+ * 处理广播数据设置完成、扫描响应等事件。
+ * ============================================================ */
+static void gap_event_handler(esp_gap_ble_cb_event_t event,
+                              esp_ble_gap_cb_param_t *param)
+{
+    if (event == ESP_GAP_BLE_ADV_DATA_RAW_SET_COMPLETE_EVT)
+    {
+        ESP_LOGI(TAG, "ADV DATA SET, starting advertising...");
+        // 广播数据设置完成后，理论上可以在这里启动广播。
+        // 但当前代码是在服务启动后（ESP_GATTS_START_EVT）才启动广播，
+        // 这样能确保服务已就绪，避免手机连上后找不到服务。
+    }
+}
+
+/* ============================================================
+ * 主入口
+ * 初始化蓝牙控制器 → Bluedroid → 注册回调 → 注册应用 → 创建任务
+ * ============================================================ */
 void app_main(void)
 {
-	queueMsg = xQueueCreate(10, sizeof(struct cmd_t *));
-	
-	ESP_LOGI(TAG, "Initializing...");
+    // 1. 初始化并启用蓝牙控制器（仅 BLE 模式）
+    esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_bt_controller_init(&bt_cfg));
+    ESP_ERROR_CHECK(esp_bt_controller_enable(ESP_BT_MODE_BLE));
 
-    ESP_ERROR_CHECK(nvs_init());
+    // 2. 初始化并启用 Bluedroid 协议栈
+    ESP_ERROR_CHECK(esp_bluedroid_init());
+    ESP_ERROR_CHECK(esp_bluedroid_enable());
 
-    ESP_ERROR_CHECK(wifi_sta_init());
+    // 3. 注册 GAP 和 GATTS 事件回调
+    ESP_ERROR_CHECK(esp_ble_gap_register_callback(gap_event_handler));
+    ESP_ERROR_CHECK(esp_ble_gatts_register_callback(gatts_event_handler));
 
-	ESP_ERROR_CHECK(ntp_init());
+    // 4. 注册 GATT 应用（参数 0 为应用 ID）
+    //    注册成功后会触发 ESP_GATTS_REG_EVT 事件
+    ESP_ERROR_CHECK(esp_ble_gatts_app_register(0));
 
-    ESP_ERROR_CHECK(http_client_init());
+    // 5. 创建通知发送任务
+    xTaskCreate(notify_task, "notify_task", 4096, NULL, 5, NULL);
 
-	ESP_ERROR_CHECK(camera_init(FRAMESIZE_QQVGA));
-
-	ESP_ERROR_CHECK(http_server_start());
-	
-	xTaskCreate(task_http_client, "task_http_client", 2048*4, NULL, 1, NULL);
-
-    while(1) {
-       vTaskDelay(pdMS_TO_TICKS(5*1000)); 
-    }
+    ESP_LOGI(TAG, "BLE GATT Server started, advertising...");
 }
