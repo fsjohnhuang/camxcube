@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Chip } from "@heroui/react";
 import { ArrowLeft, Bluetooth, RefreshCw, BluetoothConnected } from "lucide-react";
@@ -25,10 +25,13 @@ export default function BleScanPage() {
     }
   }, []);
 
-  // 你的UUID，必须和ESP32固件一致，全部小写
-  const SERVICE_UUID = "6e400001-b5a3-f537-04e0-394247741000";
-  const RX_CHAR_UUID = "6e400002-b5a3-f537-04e0-394247741000"; // 网页写
-  const TX_CHAR_UUID = "6e400003-b5a3-f537-04e0-394247741000"; // notify
+  const SERVICE_UUID = "000000ff-0000-1000-8000-00805f9b34fb";
+  const RX_CHAR_UUID = "0000ff01-0000-1000-8000-00805f9b34fb";
+  const TX_CHAR_UUID = "0000ff02-0000-1000-8000-00805f9b34fb";
+
+  const rxChar = useRef(null);
+  const txChar = useRef(null);
+
   const startScan = async () => {
     if (!navigator.bluetooth) {
       setError("Web Bluetooth is not supported");
@@ -41,10 +44,12 @@ export default function BleScanPage() {
 
     try {
       // Request Bluetooth device
-      const device = await navigator.bluetooth.requestDevice({
+      const device: BluetoothDevice = await navigator.bluetooth.requestDevice({
         acceptAllDevices: true,
-        optionalServices: ["device_information"],
+        optionalServices: [SERVICE_UUID],
+        // filters: [{ services: [SERVICE_UUID] }]
       });
+      const gatt: undefined | BluetoothRemoteGATTServer = device.gatt;
 
       // Add the requested device to the list
       setDevices([
@@ -55,17 +60,19 @@ export default function BleScanPage() {
         },
       ]);
 
-      // If device is already connected, get RSSI
-      if (device.gatt?.connected) {
-        const server = await device.gatt?.connect();
-        const service = await server.getPrimaryService("device_information");
-        // Try to read RSSI if available
-        try {
-          // RSSI is not standard in GATT, this is just a placeholder
-          // Real implementation would need specific BLE characteristic
-        } catch (e) {
-          // RSSI reading not supported
-        }
+      if (gatt && !gatt.connected) {
+        const server: BluetoothRemoteGATTServer = await gatt.connect();
+        const service: BluetoothRemoteGATTService = await server.getPrimaryService(SERVICE_UUID);
+        rxChar.current = await service.getCharacteristic(RX_CHAR_UUID);
+
+        // 必须先编码为二进制数据再写入
+        const encoder = new TextEncoder();
+        const buf = encoder.encode("myconfig123");
+        await rxChar.current.writeValue(buf);
+
+        server.device.addEventListener("gattserverdisconnected", () => {
+          console.log("BLE已断开");
+        })
       }
     } catch (err: any) {
       if (err.name !== "NotFoundError") {
