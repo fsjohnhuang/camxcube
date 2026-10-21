@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Chip } from "@heroui/react";
-import { ArrowLeft, Bluetooth, RefreshCw, BluetoothConnected } from "lucide-react";
+import { Button } from "@heroui/react";
+import { ArrowLeft, Bluetooth, BluetoothConnected } from "lucide-react";
 
 interface BleDevice {
   id: string;
   name: string;
   rssi?: number;
   device?: BluetoothDevice;
+  connected?: boolean;
 }
 
 export default function BleScanPage() {
@@ -40,7 +41,6 @@ export default function BleScanPage() {
 
     setScanning(true);
     setError("");
-    setDevices([]);
 
     try {
       // Request Bluetooth device
@@ -52,28 +52,34 @@ export default function BleScanPage() {
       const gatt: undefined | BluetoothRemoteGATTServer = device.gatt;
 
       // Add the requested device to the list
-      setDevices([
-        {
-          id: device.id,
-          name: device.name || "Unknown Device",
-          device,
-        },
-      ]);
+      setDevices((value) => {
+        if (value.find(({ id }) => id === device.id)) {
+          return value
+        }
+        else {
+          return [...value, {
+            id: device.id,
+            name: device.name || "Unknown Device",
+            device,
+            connected: gatt?.connected ?? false,
+          }]
+        }
+      });
 
-      if (gatt && !gatt.connected) {
-        const server: BluetoothRemoteGATTServer = await gatt.connect();
-        const service: BluetoothRemoteGATTService = await server.getPrimaryService(SERVICE_UUID);
-        rxChar.current = await service.getCharacteristic(RX_CHAR_UUID);
+      // if (gatt && !gatt.connected) {
+      //   const server: BluetoothRemoteGATTServer = await gatt.connect();
+      //   const service: BluetoothRemoteGATTService = await server.getPrimaryService(SERVICE_UUID);
+      //   rxChar.current = await service.getCharacteristic(RX_CHAR_UUID);
 
-        // 必须先编码为二进制数据再写入
-        const encoder = new TextEncoder();
-        const buf = encoder.encode("myconfig123");
-        await rxChar.current.writeValue(buf);
+      //   // 必须先编码为二进制数据再写入
+      //   const encoder = new TextEncoder();
+      //   const buf = encoder.encode("myconfig123");
+      //   await rxChar.current.writeValue(buf);
 
-        server.device.addEventListener("gattserverdisconnected", () => {
-          console.log("BLE已断开");
-        })
-      }
+      //   server.device.addEventListener("gattserverdisconnected", () => {
+      //     console.log("BLE已断开");
+      //   })
+      // }
     } catch (err: any) {
       if (err.name !== "NotFoundError") {
         setError(err.message || "Failed to scan for devices");
@@ -86,13 +92,26 @@ export default function BleScanPage() {
   const connectDevice = async (bleDevice: BleDevice) => {
     if (!bleDevice.device) return;
 
+    setError("")
     try {
       if (bleDevice.device.gatt?.connected) {
         await bleDevice.device.gatt.disconnect();
+        console.log("Disconnected from:", bleDevice.name);
+        setDevices((value) => {
+          const idx = value.findIndex(({ id }) => id == bleDevice.id)
+          value[idx] = { ...bleDevice, connected: false }
+          return [...value]
+        })
       }
-
-      const server = await bleDevice.device.gatt?.connect();
-      console.log("Connected to:", bleDevice.name, server);
+      else {
+        const server = await bleDevice.device.gatt?.connect();
+        console.log("Connected to:", bleDevice.name, server);
+        setDevices((value) => {
+          const idx = value.findIndex(({ id }) => id == bleDevice.id)
+          value[idx] = { ...bleDevice, connected: true }
+          return [...value]
+        })
+      }
 
       // TODO: Send data to server to register device
       // const deviceInfo = {
@@ -100,7 +119,7 @@ export default function BleScanPage() {
       //   mac: bleDevice.id, // MAC address format varies by platform
       // };
 
-      navigate("/devices");
+      // navigate("/devices");
     } catch (err: any) {
       setError(`Failed to connect: ${err.message}`);
     }
@@ -170,11 +189,9 @@ export default function BleScanPage() {
       <main className="flex-1 px-4 py-4 pb-24 space-y-4">
         {/* Scan Button */}
         <Button
-          color="primary"
           className="w-full"
           onClick={startScan}
-          isLoading={scanning}
-          startContent={!scanning && <RefreshCw className="w-4 h-4" />}
+          isPending={scanning}
         >
           {scanning ? "Scanning..." : "Start Scan"}
         </Button>
@@ -202,7 +219,7 @@ export default function BleScanPage() {
             >
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
-                  {device.device?.gatt?.connected ? (
+                  {device.connected ? (
                     <BluetoothConnected className="w-5 h-5 text-green-500" />
                   ) : (
                     <Bluetooth className="w-5 h-5 text-blue-500" />
@@ -211,16 +228,16 @@ export default function BleScanPage() {
                 <div>
                   <p className="font-medium text-gray-900">{device.name}</p>
                   <p className="text-xs text-gray-500">
-                    {device.device?.gatt?.connected ? "Connected" : "Available"}
+                    {device.connected ? "Connected" : "Available"}
                   </p>
                 </div>
               </div>
               <Button
                 size="sm"
-                color="primary"
+                variant={device.connected ? "danger-soft" : undefined}
                 onClick={() => connectDevice(device)}
               >
-                Connect
+                {device.connected ? "Disconnect" : "Connect"}
               </Button>
             </div>
           ))}
