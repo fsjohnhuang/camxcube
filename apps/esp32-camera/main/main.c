@@ -3,6 +3,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
+#include "nvs_flash.h"
 #include "esp_bt.h"              // 蓝牙控制器底层 API
 #include "esp_bt_main.h"         // Bluedroid 协议栈初始化
 #include "esp_gap_ble_api.h"     // GAP 层：广播、扫描、连接
@@ -13,12 +14,10 @@ static const char *TAG = "BLE_EXAMPLE"; // 日志标签
 
 /* ============================================================
  * 自定义 UUID
- * 注意：这里用宏定义 UUID，在属性表中取地址会报错（见之前讨论）。
- *       实际项目应改为 static const uint16_t 变量，或使用 128 位 UUID。
  * ============================================================ */
-#define SERVICE_UUID 0x00FF // 自定义服务 UUID
-#define CHAR_RX_UUID 0xFF01 // 手机写入数据的特征值
-#define CHAR_TX_UUID 0xFF02 // ESP32-S3 通知数据的特征值
+static const uint16_t SERVICE_UUID = 0x00FF; // 自定义服务 UUID
+static const uint16_t CHAR_RX_UUID = 0xFF01; // 手机写入数据的特征值
+static const uint16_t CHAR_TX_UUID = 0xFF02; // ESP32-S3 通知数据的特征值
 
 /* ============================================================
  * 属性表索引
@@ -111,11 +110,11 @@ static const esp_gatts_attr_db_t gatt_db[IDX_NB] = {
  * GAP 广播数据
  * 格式：长度 + 类型 + 数据
  *   0x02 0x01 0x06  → Flags: LE General Discoverable, BR/EDR Not Supported
- *   0x09 0x09 ...   → Complete Local Name: "BLE_DEMO"
+ *   0x09 0x09 ...   → Complete Local Name: "ESP_CAM"
  * ============================================================ */
 static uint8_t adv_data[] = {
     0x02, 0x01, 0x06,
-    0x09, 0x09, 'B', 'L', 'E', '_', 'D', 'E', 'M', 'O'};
+    0x08, 0x09, 'E', 'S', 'P', '_', 'C', 'A', 'M'};
 
 // 广播参数
 static esp_ble_adv_params_t adv_params = {
@@ -180,7 +179,7 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
     case ESP_GATTS_REG_EVT:
         ESP_LOGI(TAG, "REGISTER_APP_EVT");
         gatts_if = gatts_if_param;                                         // 保存接口号
-        esp_ble_gap_set_device_name("BLE_DEMO");                           // 设置设备名
+        esp_ble_gap_set_device_name("ESP_CAM");                            // 设置设备名，和广播名称是独立存在的
         esp_ble_gap_config_adv_data_raw(adv_data, sizeof(adv_data));       // 配置广播数据
         esp_ble_gatts_create_attr_tab(gatt_db, gatts_if_param, IDX_NB, 0); // 创建属性表
         break;
@@ -276,6 +275,19 @@ static void gap_event_handler(esp_gap_ble_cb_event_t event,
  * ============================================================ */
 void app_main(void)
 {
+    // Initialize NVS (required for Wi-Fi to store configuration)
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
+        // erase the whole SPI flash if no space leaves or new version has been found.
+        err = nvs_flash_erase();
+        if (err == ESP_OK)
+        {
+            err = nvs_flash_init();
+        }
+    }
+    ESP_ERROR_CHECK(err);
+
     // 1. 初始化并启用蓝牙控制器（仅 BLE 模式）
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_bt_controller_init(&bt_cfg));

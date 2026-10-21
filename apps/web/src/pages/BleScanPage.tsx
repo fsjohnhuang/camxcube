@@ -25,6 +25,10 @@ export default function BleScanPage() {
     }
   }, []);
 
+  // 你的UUID，必须和ESP32固件一致，全部小写
+  const SERVICE_UUID = "6e400001-b5a3-f537-04e0-394247741000";
+  const RX_CHAR_UUID = "6e400002-b5a3-f537-04e0-394247741000"; // 网页写
+  const TX_CHAR_UUID = "6e400003-b5a3-f537-04e0-394247741000"; // notify
   const startScan = async () => {
     if (!navigator.bluetooth) {
       setError("Web Bluetooth is not supported");
