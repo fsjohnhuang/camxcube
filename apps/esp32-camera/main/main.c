@@ -9,6 +9,7 @@
 #include "esp_gap_ble_api.h"     // GAP 层：广播、扫描、连接
 #include "esp_gatts_api.h"       // GATTS 层：服务、特征值、描述符
 #include "esp_gatt_common_api.h" // GATT 通用 API（如设置 MTU）
+#include "cJSON.h"
 
 static const char *TAG = "BLE_EXAMPLE"; // 日志标签
 
@@ -230,6 +231,22 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
         else if (handle == handle_table[IDX_CHAR_RX_VAL])
         {
             ESP_LOGI(TAG, "RX DATA: %.*s", len, (char *)value); // 打印接收到的数据
+            cJSON *parsed_root = cJSON_Parse((char *)value);
+            if (parsed_root == NULL)
+            {
+                const char *error_ptr = cJSON_GetErrorPtr();
+                if (error_ptr != NULL)
+                {
+                    ESP_LOGE(TAG, "Error before: %s", error_ptr);
+                }
+                return;
+            }
+            cJSON *name = cJSON_GetObjectItemCaseSensitive(parsed_root, "name");
+            if (cJSON_IsString(name) && (name->valuestring != NULL))
+            {
+                ESP_LOGI(TAG, "Parsed Name: %s", name->valuestring);
+            }
+            cJSON_Delete(parsed_root);
             // TODO: 在这里处理手机发来的业务数据
         }
 
