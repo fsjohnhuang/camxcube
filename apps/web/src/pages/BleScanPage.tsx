@@ -1,15 +1,10 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@heroui/react";
-import { ArrowLeft, Bluetooth, BluetoothConnected } from "lucide-react";
-
-interface BleDevice {
-  id: string;
-  name: string;
-  rssi?: number;
-  device?: BluetoothDevice;
-  connected?: boolean;
-}
+import { ArrowLeft, Bluetooth } from "lucide-react";
+import BleDeviceItem, { type BleDevice } from "../components/ble/BleDeviceItem";
+import BleWifiConfigDialog from "../components/ble/BleWifiConfigDialog";
+import { BLE_SERVICE_UUID } from "../components/ble/bleClient";
 
 export default function BleScanPage() {
   const navigate = useNavigate();
@@ -17,6 +12,7 @@ export default function BleScanPage() {
   const [devices, setDevices] = useState<BleDevice[]>([]);
   const [error, setError] = useState<string>("");
   const [bluetoothAvailable, setBluetoothAvailable] = useState(true);
+  const [selectedDevice, setSelectedDevice] = useState<BleDevice | null>(null);
 
   useEffect(() => {
     // Check if Web Bluetooth is supported
@@ -25,13 +21,6 @@ export default function BleScanPage() {
       setError("Web Bluetooth is not supported in this browser");
     }
   }, []);
-
-  const SERVICE_UUID = "000000ff-0000-1000-8000-00805f9b34fb";
-  const RX_CHAR_UUID = "0000ff01-0000-1000-8000-00805f9b34fb";
-  const TX_CHAR_UUID = "0000ff02-0000-1000-8000-00805f9b34fb";
-
-  const rxChar = useRef(null);
-  const txChar = useRef(null);
 
   const startScan = async () => {
     if (!navigator.bluetooth) {
@@ -46,7 +35,7 @@ export default function BleScanPage() {
       // Request Bluetooth device
       const device: BluetoothDevice = await navigator.bluetooth.requestDevice({
         acceptAllDevices: true,
-        optionalServices: [SERVICE_UUID],
+        optionalServices: [BLE_SERVICE_UUID],
         // filters: [{ services: [SERVICE_UUID] }]
       });
       const gatt: undefined | BluetoothRemoteGATTServer = device.gatt;
@@ -66,20 +55,6 @@ export default function BleScanPage() {
         }
       });
 
-      // if (gatt && !gatt.connected) {
-      //   const server: BluetoothRemoteGATTServer = await gatt.connect();
-      //   const service: BluetoothRemoteGATTService = await server.getPrimaryService(SERVICE_UUID);
-      //   rxChar.current = await service.getCharacteristic(RX_CHAR_UUID);
-
-      //   // 必须先编码为二进制数据再写入
-      //   const encoder = new TextEncoder();
-      //   const buf = encoder.encode("myconfig123");
-      //   await rxChar.current.writeValue(buf);
-
-      //   server.device.addEventListener("gattserverdisconnected", () => {
-      //     console.log("BLE已断开");
-      //   })
-      // }
     } catch (err: any) {
       if (err.name !== "NotFoundError") {
         setError(err.message || "Failed to scan for devices");
@@ -123,6 +98,15 @@ export default function BleScanPage() {
     } catch (err: any) {
       setError(`Failed to connect: ${err.message}`);
     }
+  };
+
+  const selectDevice = (bleDevice: BleDevice) => {
+    if (!bleDevice.connected) {
+      setError("Connect the device first");
+      return;
+    }
+    setError("");
+    setSelectedDevice(bleDevice);
   };
 
   if (!bluetoothAvailable) {
@@ -213,36 +197,20 @@ export default function BleScanPage() {
           )}
 
           {devices.map((device) => (
-            <div
+            <BleDeviceItem
               key={device.id}
-              className="bg-white rounded-xl p-4 flex items-center justify-between"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
-                  {device.connected ? (
-                    <BluetoothConnected className="w-5 h-5 text-green-500" />
-                  ) : (
-                    <Bluetooth className="w-5 h-5 text-blue-500" />
-                  )}
-                </div>
-                <div>
-                  <p className="font-medium text-gray-900">{device.name}</p>
-                  <p className="text-xs text-gray-500">
-                    {device.connected ? "Connected" : "Available"}
-                  </p>
-                </div>
-              </div>
-              <Button
-                size="sm"
-                variant={device.connected ? "danger-soft" : undefined}
-                onClick={() => connectDevice(device)}
-              >
-                {device.connected ? "Disconnect" : "Connect"}
-              </Button>
-            </div>
+              device={device}
+              onToggleConnection={connectDevice}
+              onSelect={selectDevice}
+            />
           ))}
         </div>
       </main>
+
+      <BleWifiConfigDialog
+        device={selectedDevice}
+        onClose={() => setSelectedDevice(null)}
+      />
     </div>
   );
 }

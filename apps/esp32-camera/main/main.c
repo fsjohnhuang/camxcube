@@ -4,6 +4,7 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "nvs.h"
 #include "esp_bt.h"              // 蓝牙控制器底层 API
 #include "esp_bt_main.h"         // Bluedroid 协议栈初始化
 #include "esp_gap_ble_api.h"     // GAP 层：广播、扫描、连接
@@ -19,6 +20,7 @@ static const char *TAG = "BLE_EXAMPLE"; // 日志标签
 static const uint16_t SERVICE_UUID = 0x00FF; // 自定义服务 UUID
 static const uint16_t CHAR_RX_UUID = 0xFF01; // 手机写入数据的特征值
 static const uint16_t CHAR_TX_UUID = 0xFF02; // ESP32-S3 通知数据的特征值
+static const uint16_t CHAR_CFG_UUID = 0xFF03; // Wi-Fi 配置特征值（读当前配置 / 写入新配置）
 
 /* ============================================================
  * 属性表索引
@@ -33,6 +35,8 @@ enum
     IDX_CHAR_TX_DECL, // TX 特征声明
     IDX_CHAR_TX_VAL,  // TX 特征值（ESP32-S3 通知）
     IDX_CHAR_TX_CFG,  // TX 的 CCC 描述符（控制通知开关）
+    IDX_CHAR_CFG_DECL, // Wi-Fi 配置特征声明
+    IDX_CHAR_CFG_VAL,  // Wi-Fi 配置特征值（手机读写）
     IDX_NB,           // 属性总数
 };
 
@@ -56,13 +60,15 @@ static const uint16_t primary_service_uuid = ESP_GATT_UUID_PRI_SERVICE;         
 static const uint16_t character_declaration_uuid = ESP_GATT_UUID_CHAR_DECLARE;         // 0x2803
 static const uint16_t character_client_config_uuid = ESP_GATT_UUID_CHAR_CLIENT_CONFIG; // 0x2902
 
-// 特征属性：RX 可写，TX 支持通知
+// 特征属性：RX 可写，TX 支持通知，CFG 可读可写
 static const uint8_t char_prop_write = ESP_GATT_CHAR_PROP_BIT_WRITE;   // 0x08
 static const uint8_t char_prop_notify = ESP_GATT_CHAR_PROP_BIT_NOTIFY; // 0x10
+static const uint8_t char_prop_read_write = ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE;
 
 // 特征值初始数据
 static uint8_t rx_value[500] = {0};         // RX 特征值的缓冲区
 static uint8_t ccc_value[2] = {0x00, 0x00}; // CCC 默认值：通知关闭
+static uint8_t cfg_value[256] = {0};        // CFG 特征值的缓冲区（JSON 配置）
 
 /* ============================================================
  * GATT 属性表
@@ -105,7 +111,82 @@ static const esp_gatts_attr_db_t gatt_db[IDX_NB] = {
     [IDX_CHAR_TX_CFG] = {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&character_client_config_uuid,
                                                ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE, // 可读可写
                                                sizeof(uint16_t), sizeof(ccc_value), ccc_value}},
+    // ---- Wi-Fi 配置特征声明 (0x2803) ----
+    // 声明这是一个特征，属性为 Read | Write
+    [IDX_CHAR_CFG_DECL] = {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&character_declaration_uuid, ESP_GATT_PERM_READ, sizeof(uint8_t), sizeof(char_prop_read_write), (uint8_t *)&char_prop_read_write}},
+    // ---- Wi-Fi 配置特征值 ----
+    // 由应用自己读写（ESP_GATT_RSP_BY_APP）：读时返回 NVS 中的 JSON，写时保存到 NVS
+    [IDX_CHAR_CFG_VAL] = {{ESP_GATT_RSP_BY_APP}, {
+                                                 ESP_UUID_LEN_16, (uint8_t *)&CHAR_CFG_UUID, // UUID: 0xFF03
+                                                 ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,    // 权限：可读可写
+                                                 sizeof(cfg_value), 0, cfg_value             // 最大长度 128，初始长度 0
+                                             }},
 };
+
+/* ============================================================
+ * Wi-Fi 配置（NVS 存储）
+ * 配置保存在 NVS 中，手机可以通过 BLE 读取/修改。
+ * ============================================================ */
+#define WIFI_CFG_NAMESPACE "wifi_cfg"
+#define WIFI_CFG_KEY_SSID "ssid"
+#define WIFI_CFG_KEY_PASS "pass"
+
+// 读取已保存的 Wi-Fi 配置；未保存过时两个缓冲区保持为空字符串
+static esp_err_t wifi_cfg_load(char *ssid, size_t ssid_len, char *pass, size_t pass_len)
+{
+    if (ssid == NULL || pass == NULL || ssid_len == 0 || pass_len == 0)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    ssid[0] = '\0';
+    pass[0] = '\0';
+
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(WIFI_CFG_NAMESPACE, NVS_READONLY, &handle);
+    if (err != ESP_OK)
+    {
+        return err;
+    }
+
+    size_t len = ssid_len;
+    err = nvs_get_str(handle, WIFI_CFG_KEY_SSID, ssid, &len);
+    if (err == ESP_OK)
+    {
+        len = pass_len;
+        err = nvs_get_str(handle, WIFI_CFG_KEY_PASS, pass, &len);
+    }
+    if (err != ESP_OK)
+    {
+        // 读取失败（例如还没保存过配置），返回空配置
+        ssid[0] = '\0';
+        pass[0] = '\0';
+    }
+    nvs_close(handle);
+    return err;
+}
+
+// 保存 Wi-Fi 配置到 NVS
+static esp_err_t wifi_cfg_save(const char *ssid, const char *pass)
+{
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(WIFI_CFG_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK)
+    {
+        return err;
+    }
+
+    err = nvs_set_str(handle, WIFI_CFG_KEY_SSID, ssid);
+    if (err == ESP_OK)
+    {
+        err = nvs_set_str(handle, WIFI_CFG_KEY_PASS, pass);
+    }
+    if (err == ESP_OK)
+    {
+        err = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    return err;
+}
 
 /* ============================================================
  * GAP 广播数据
@@ -213,6 +294,46 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
         esp_ble_gap_start_advertising(&adv_params); // 重新开始广播，等待下次连接
         break;
 
+    // ---- 手机读取特征值 ----
+    case ESP_GATTS_READ_EVT:
+    {
+        uint16_t handle = param->read.handle;
+
+        // 读取 Wi-Fi 配置：从 NVS 取出并以 JSON 返回
+        // 该特征是 ESP_GATT_RSP_BY_APP，需要应用自己回复，协议栈不会自动响应
+        if (handle == handle_table[IDX_CHAR_CFG_VAL] && param->read.need_rsp)
+        {
+            char ssid[33] = {0};
+            char pass[65] = {0};
+            wifi_cfg_load(ssid, sizeof(ssid), pass, sizeof(pass));
+
+            cJSON *root = cJSON_CreateObject();
+            cJSON_AddStringToObject(root, "ssid", ssid);
+            cJSON_AddStringToObject(root, "password", pass);
+            char *json = cJSON_PrintUnformatted(root);
+            cJSON_Delete(root);
+
+            if (json != NULL)
+            {
+                esp_gatt_rsp_t rsp;
+                memset(&rsp, 0, sizeof(rsp));
+                rsp.attr_value.handle = handle;
+                rsp.attr_value.offset = 0;
+                rsp.attr_value.len = strlen(json);
+                memcpy(rsp.attr_value.value, json, rsp.attr_value.len);
+                esp_ble_gatts_send_response(gatts_if_param, param->read.conn_id,
+                                            param->read.trans_id, ESP_GATT_OK, &rsp);
+                cJSON_free(json);
+            }
+            else
+            {
+                esp_ble_gatts_send_response(gatts_if_param, param->read.conn_id,
+                                            param->read.trans_id, ESP_GATT_ERROR, NULL);
+            }
+        }
+        break;
+    }
+
     // ---- 手机写入数据 ----
     case ESP_GATTS_WRITE_EVT:
     {
@@ -248,6 +369,58 @@ static void gatts_event_handler(esp_gatts_cb_event_t event,
             }
             cJSON_Delete(parsed_root);
             // TODO: 在这里处理手机发来的业务数据
+        }
+        // 判断写的是 Wi-Fi 配置特征值（手机发来的新配置）
+        else if (handle == handle_table[IDX_CHAR_CFG_VAL])
+        {
+            // 该特征是 ESP_GATT_RSP_BY_APP，协议栈不会自动回复，必须由应用回复
+            esp_gatt_status_t rsp_status = ESP_GATT_OK;
+            char json[sizeof(cfg_value) + 1] = {0};
+
+            if (len > sizeof(cfg_value))
+            {
+                len = sizeof(cfg_value);
+            }
+            memcpy(json, value, len);
+            json[len] = '\0';
+
+            cJSON *root = cJSON_Parse(json);
+            if (root == NULL)
+            {
+                ESP_LOGE(TAG, "Failed to parse Wi-Fi config JSON");
+                rsp_status = ESP_GATT_ERROR;
+            }
+            else
+            {
+                cJSON *ssid = cJSON_GetObjectItemCaseSensitive(root, "ssid");
+                cJSON *pass = cJSON_GetObjectItemCaseSensitive(root, "password");
+                if (cJSON_IsString(ssid) && cJSON_IsString(pass))
+                {
+                    esp_err_t err = wifi_cfg_save(ssid->valuestring, pass->valuestring);
+                    if (err == ESP_OK)
+                    {
+                        ESP_LOGI(TAG, "Wi-Fi config saved: ssid=%s", ssid->valuestring);
+                    }
+                    else
+                    {
+                        ESP_LOGE(TAG, "Failed to save Wi-Fi config: %s", esp_err_to_name(err));
+                        rsp_status = ESP_GATT_ERROR;
+                    }
+                }
+                else
+                {
+                    ESP_LOGE(TAG, "Invalid Wi-Fi config JSON: missing ssid/password");
+                    rsp_status = ESP_GATT_ERROR;
+                }
+                cJSON_Delete(root);
+            }
+
+            if (param->write.need_rsp)
+            {
+                esp_ble_gatts_send_response(gatts_if_param, param->write.conn_id,
+                                            param->write.trans_id, rsp_status, NULL);
+            }
+            return;
         }
 
         // 如果客户端要求响应，则发送写响应

@@ -2,7 +2,15 @@
   "permissions": {
     "allow": [
       "Bash(pnpm add:*)",
-      "mcp__ide__getDiagnostics"
+      "mcp__ide__getDiagnostics",
+      "Bash(grep -rn \"cx\\\\|clsx\\\\|classnames\" package.json src --include=*.tsx --include=*.ts -l | head)",
+      "Bash(pnpm exec tsc -b --pretty false 2>&1 | head -20)",
+      "Bash(cd /Users/johnhuang/Desktop/camxcube/apps/web/src && ls -R . | head -60 && echo === && cat api/*.ts 2>/dev/null | head -80)",
+      "Bash(cd /Users/johnhuang/Desktop/camxcube/apps/esp32-camera && source /Users/johnhuang/esp/esp-idf/v6.0/export.sh >/dev/null 2>&1 && idf.py build 2>&1 | tail -25)",
+      "Bash(pnpm build 2>&1 | tail -40)",
+      "Bash(ls node_modules | grep -i \"aria\" | head; echo ===; grep -rn \"isPending\" node_modules/react-aria-components/dist/*.d.ts 2>/dev/null | head)",
+      "Bash(cd /Users/johnhuang/Desktop/camxcube/node_modules/.pnpm/react-aria-components@1.21.1_react-dom@19.2.8_react@19.2.8__react@19.2.8/node_modules/react-aria-components && ls && grep -rn \"isPending\" dist/*.d.ts | head)",
+      "Bash(cd /Users/johnhuang/Desktop/camxcube/node_modules/.pnpm/react-aria-components@1.21.1_react-dom@19.2.8_react@19.2.8__react@19.2.8/node_modules/react-aria-components && grep -rn \"isPending\" dist/types/*.d.ts | head)"
     ]
   }
 }
